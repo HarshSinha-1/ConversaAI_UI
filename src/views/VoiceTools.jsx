@@ -1,0 +1,1397 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Volume2,
+  Mic,
+  Sparkles,
+  Trash2,
+  Play,
+  Square,
+  Upload,
+  File,
+  Copy,
+  Loader2,
+  Download,
+  User,
+  ChevronDown,
+  AlertCircle,
+  CheckCircle2,
+} from 'lucide-react';
+import { textToSpeech, getVoices, getDemoVoices, speechToText, demoSTT, buildAudioUrl, getJobStatus } from '../services/api';
+import AudioReviewPanel from '../components/AudioReviewPanel';
+import { attachAudioLevelMeter } from '../utils/audioLevel';
+import { fileNameFromUrl } from '../utils/sanitizeUrl';
+import SiriOrb from '../components/SiriOrb';
+import OrbitField from '../components/OrbitField';
+
+// ─── Available Voices Fallback ─────────────────────────────────────────────────
+const FALLBACK_VOICES = [
+  { id: 'divya',        name: 'Divya',        gender: 'female', style: 'Monotone, fast',       language: 'multilingual', model: 'indic_parler' },
+  { id: 'sita',         name: 'Sita',         gender: 'female', style: 'Calm, slow',            language: 'multilingual', model: 'indic_parler' },
+  { id: 'meera',        name: 'Meera',        gender: 'female', style: 'Expressive, warm',      language: 'multilingual', model: 'indic_parler' },
+  { id: 'priya',        name: 'Priya',        gender: 'female', style: 'Clear, professional',   language: 'multilingual', model: 'indic_parler' },
+  { id: 'rohit',        name: 'Rohit',        gender: 'male',   style: 'Calm, neutral',         language: 'multilingual', model: 'indic_parler' },
+  { id: 'arjun',        name: 'Arjun',        gender: 'male',   style: 'Deep, slow',            language: 'multilingual', model: 'indic_parler' },
+  { id: 'vikram',       name: 'Vikram',       gender: 'male',   style: 'Confident, expressive', language: 'multilingual', model: 'indic_parler' },
+  { id: 'amir',         name: 'Amir',         gender: 'male',   style: 'Clear, slightly fast',  language: 'multilingual', model: 'indic_parler' },
+  // Qwen3-TTS-CustomVoice speakers — any speaker can render any of the 10
+  // supported global languages (cross-lingual), so these are tagged
+  // 'multilingual' like the Indic voices above, not locked to one language.
+  { id: 'vivian',   name: 'Vivian',   gender: 'female', style: 'Bright, slightly edgy young female',        language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'serena',   name: 'Serena',   gender: 'female', style: 'Warm, gentle young female',                 language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'ono_anna', name: 'Ono Anna', gender: 'female', style: 'Playful, light and nimble timbre',          language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'sohee',    name: 'Sohee',    gender: 'female', style: 'Warm, rich emotion',                        language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'uncle_fu', name: 'Uncle Fu', gender: 'male',   style: 'Seasoned, low mellow timbre',                language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'dylan',    name: 'Dylan',    gender: 'male',   style: 'Youthful, clear natural timbre',             language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'eric',     name: 'Eric',     gender: 'male',   style: 'Lively, slightly husky brightness',          language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'ryan',     name: 'Ryan',     gender: 'male',   style: 'Dynamic, strong rhythmic drive',             language: 'multilingual', model: 'qwen_custom_voice' },
+  { id: 'aiden',    name: 'Aiden',    gender: 'male',   style: 'Sunny, clear midrange',                      language: 'multilingual', model: 'qwen_custom_voice' },
+];
+
+const STT_LANGUAGES = [
+  { code: 'auto', name: 'Auto-Detect Language' },
+  { code: 'en', name: 'English' },
+  { code: 'hi', name: 'Hindi (हिंदी)' },
+  { code: 'ta', name: 'Tamil (தமிழ்)' },
+  { code: 'te', name: 'Telugu (తెలుగు)' },
+  { code: 'bn', name: 'Bengali (বাংলা)' },
+  { code: 'mr', name: 'Marathi (मराठी)' },
+  { code: 'gu', name: 'Gujarati (ગુજરાતી)' },
+  { code: 'kn', name: 'Kannada (ಕನ್ನಡ)' },
+  { code: 'ml', name: 'Malayalam (മലയാളം)' },
+  { code: 'es', name: 'Spanish (Español)' },
+  { code: 'fr', name: 'French (Français)' },
+  { code: 'de', name: 'German (Deutsch)' },
+  { code: 'ja', name: 'Japanese (日本語)' },
+  { code: 'ko', name: 'Korean (한국어)' },
+  { code: 'zh', name: 'Chinese (中文)' },
+  { code: 'ar', name: 'Arabic (العربية)' },
+  { code: 'ru', name: 'Russian (Русский)' },
+];
+
+const TTS_LANGUAGES = [
+  {
+    category: 'Indic Languages',
+    langs: [
+      { code: 'hi', name: 'Hindi (हिंदी)' },
+      { code: 'ta', name: 'Tamil (தமிழ்)' },
+      { code: 'te', name: 'Telugu (తెలుగు)' },
+      { code: 'bn', name: 'Bengali (বাংলা)' },
+      { code: 'mr', name: 'Marathi (मराठी)' },
+      { code: 'gu', name: 'Gujarati (ગુજરાતી)' },
+      { code: 'kn', name: 'Kannada (ಕನ್ನಡ)' },
+      { code: 'ml', name: 'Malayalam (മലയാളം)' },
+      { code: 'pa', name: 'Punjabi (ਪੰਜਾਬੀ)' },
+      { code: 'ur', name: 'Urdu (اردو)' },
+      { code: 'or', name: 'Odia (ଓଡ଼ିଆ)' },
+      { code: 'as', name: 'Assamese (অসমীয়া)' },
+      { code: 'sa', name: 'Sanskrit (संस्कृतम्)' },
+    ]
+  },
+  {
+    category: 'Global / Non-Indic Languages',
+    langs: [
+      { code: 'en', name: 'English' },
+      { code: 'es', name: 'Spanish (Español)' },
+      { code: 'fr', name: 'French (Français)' },
+      { code: 'de', name: 'German (Deutsch)' },
+      { code: 'it', name: 'Italian (Italiano)' },
+      { code: 'ja', name: 'Japanese (日本語)' },
+      { code: 'ko', name: 'Korean (한국어)' },
+      { code: 'pt', name: 'Portuguese (Português)' },
+      { code: 'ru', name: 'Russian (Русский)' },
+      { code: 'zh', name: 'Chinese (中文)' },
+    ]
+  }
+];
+
+const CHAR_LIMIT = 500;
+
+export default function VoiceTools({ showToast, defaultSubView = 'studio', user, historyData = [], setHistoryData }) {
+  const [subView, setSubView] = useState(defaultSubView);
+  const [historySearch, setHistorySearch] = useState('');
+
+  // ── TTS State ──────────────────────────────────────────────────────────────
+  const [text, setText] = useState('');
+  const [ttsLanguage, setTtsLanguage] = useState('hi');
+  const [selectedVoice, setSelectedVoice] = useState('divya');
+  const [audioFormat, setAudioFormat] = useState('wav');
+  const [voices, setVoices] = useState(FALLBACK_VOICES);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+  // Separate download URL: presigned to save-with-filename (Content-Disposition)
+  // rather than play inline. Falls back to audioUrl if the server omits it.
+  const [downloadUrl, setDownloadUrl] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef(null);
+
+  // ── STT State ──────────────────────────────────────────────────────────────
+  const [sttMode, setSttMode] = useState('record'); // 'record' | 'upload'
+  const [sttState, setSttState] = useState('idle');  // 'idle' | 'recording' | 'reviewing' | 'transcribing' | 'completed'
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [reviewBlob, setReviewBlob] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [transcriptResult, setTranscriptResult] = useState(null);
+  const [resultTab, setResultTab] = useState('text'); // 'text' | 'timeline'
+  const [sttLanguage, setSttLanguage] = useState('en');
+  const [sttError, setSttError] = useState('');
+  const [ttsError, setTtsError] = useState('');
+  // Live mic volume (0-1) while recording, drives the Siri-style reactive orb.
+  const [micLevel, setMicLevel] = useState(0);
+  const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const discardRecordingRef = useRef(false);
+  const micLevelMeterRef = useRef(null);
+  // Generation counters for the async job-polling loops. Each submission takes
+  // the next generation; anything that invalidates the in-flight request
+  // (closing the panel, recording a new clip, loading another file) bumps the
+  // counter so a superseded loop stops polling and never applies a PREVIOUS
+  // recording's transcript/audio to the current one.
+  const sttGenRef = useRef(0);
+  const ttsGenRef = useRef(0);
+
+  // ── Deep-link sync ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    sttGenRef.current += 1;
+    ttsGenRef.current += 1;
+    setSubView(defaultSubView);
+    setSttState('idle');
+    setReviewBlob(null);
+    setTranscriptResult(null);
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setDownloadUrl(null);
+    setSttError('');
+    setTtsError('');
+  }, [defaultSubView]);
+
+  // ── Stop audio + release the mic on unmount (user navigates away) ───────────
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+      // Release the microphone if the user leaves mid-recording — otherwise the
+      // MediaRecorder and its mic stream stay live, so the browser keeps showing
+      // the recording indicator with no UI left to stop it.
+      const mr = mediaRecorderRef.current;
+      if (mr) {
+        try {
+          if (mr.state !== 'inactive') mr.stop();
+        } catch {
+          // recorder already torn down — nothing to stop
+        }
+        mr.stream?.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
+
+  // ── Auto-play newly synthesized audio ───────────────────────────────────────
+  // Runs after React commits the new `audioUrl`, so the <audio> element (which is
+  // conditionally rendered) is mounted and its `src` is applied — this replaces
+  // the old setTimeout(…, 200) that merely guessed when the ref/src were ready.
+  // No `.load()`: the declarative `src={audioUrl}` binding already starts the
+  // fetch; calling load() here would abort it and re-fetch the same file.
+  useEffect(() => {
+    if (!audioUrl || !audioRef.current) return;
+    // Autoplay may be blocked by the browser — the rejection is harmless.
+    audioRef.current.play().catch(() => {});
+  }, [audioUrl]);
+
+  // ── Dynamic Voice Fetching ──────────────────────────────────────────────────
+  useEffect(() => {
+    const fetchVoices = async () => {
+      try {
+        let data;
+        if (user?.api_key) {
+          data = await getVoices(user.api_key);
+        } else {
+          data = await getDemoVoices();
+        }
+        if (data?.voices && data.voices.length > 0) {
+          setVoices(data.voices);
+          // Set to first voice if selected voice is not in the list
+          const exists = data.voices.some(v => v.id === selectedVoice);
+          if (!exists) {
+            setSelectedVoice(data.voices[0].id);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load dynamic voices, using fallbacks.', err);
+      }
+    };
+    fetchVoices();
+  }, [user]);
+
+  // ── Sync Selected Voice with Language Category ──────────────────────────────
+  useEffect(() => {
+    const isIndicLanguage = (langCode) => {
+      const indicGroup = TTS_LANGUAGES.find(g => g.category === 'Indic Languages');
+      return indicGroup?.langs.some(l => l.code === langCode) || false;
+    };
+    const isIndic = isIndicLanguage(ttsLanguage);
+    const validVoices = voices.filter(v => {
+      const isGlobalVoice = v.model === 'qwen_custom_voice';
+      return isIndic ? !isGlobalVoice : isGlobalVoice;
+    });
+
+    if (validVoices.length > 0) {
+      const isSelectedValid = validVoices.some(v => v.id === selectedVoice);
+      if (!isSelectedValid) {
+        setSelectedVoice(validVoices[0].id);
+      }
+    }
+  }, [ttsLanguage, voices, selectedVoice]);
+
+  // ── Recording timer ──────────────────────────────────────────────────────
+  useEffect(() => {
+    let timer;
+    if (sttState === 'recording') {
+      timer = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+    } else {
+      setRecordingTime(0);
+    }
+    return () => clearInterval(timer);
+  }, [sttState]);
+
+  // ── TTS: Convert to Speech ─────────────────────────────────────────────────
+  const handleConvertToSpeech = async () => {
+    if (!text.trim()) {
+      showToast('Please enter some text to synthesize.', 'error');
+      return;
+    }
+    if (text.length > CHAR_LIMIT) {
+      showToast(`Character limit of ${CHAR_LIMIT} exceeded.`, 'error');
+      return;
+    }
+    if (!user?.api_key) {
+      showToast('No API key found. Please log in again.', 'error');
+      return;
+    }
+
+    const gen = ++ttsGenRef.current;
+    const isCurrent = () => gen === ttsGenRef.current;
+
+    setIsSynthesizing(true);
+    setTtsError('');
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setDownloadUrl(null);
+    setIsPlaying(false);
+
+    try {
+      // Prepend language prefix to selected speaker voice as gateway routes
+      const voiceParam = `${ttsLanguage}-${selectedVoice}`;
+      let data = await textToSpeech(user.api_key, text.trim(), voiceParam, audioFormat);
+
+      if (data?.status === 'queued' && data?.job_id) {
+        showToast('TTS job queued, synthesizing...', 'info');
+        let job = data;
+        // Cap polling so a stuck job can't spin this UI forever.
+        const deadline = Date.now() + 180000;
+        // Adaptive polling: short jobs finish in a few seconds, so poll fast
+        // at first and back off — a fixed 1.5s interval added up to 1.5s of
+        // dead wait AFTER the job had already completed.
+        let pollDelay = 500;
+        while (job.status === 'queued' || job.status === 'processing') {
+          if (!isCurrent()) return; // superseded — stop polling, discard result
+          if (Date.now() > deadline) {
+            throw new Error('TTS job timed out after 3 minutes. Please try again.');
+          }
+          await new Promise(resolve => setTimeout(resolve, pollDelay));
+          pollDelay = Math.min(pollDelay * 1.5, 1500);
+          if (!isCurrent()) return;
+          job = await getJobStatus(user.api_key, data.job_id, 'tts');
+          if (job.status === 'failed') {
+            throw new Error(job.error || 'Async TTS synthesis failed on worker.');
+          }
+          if (job.queue_position) {
+            setTtsError(''); // clear any stale error while waiting in queue
+          }
+        }
+        data = job;
+      }
+
+      if (!isCurrent()) return;
+
+      if (!data?.audio_url) {
+        throw new Error('No audio URL returned by server.');
+      }
+
+      // Build absolute URL from server base
+      const fullAudioUrl = buildAudioUrl(data.audio_url);
+      setAudioUrl(fullAudioUrl);
+      setDownloadUrl(data.download_url ? buildAudioUrl(data.download_url) : fullAudioUrl);
+      setAudioBlob(data);
+      showToast('✅ Audio synthesized successfully!', 'success');
+
+      // Auto-play is handled by the effect keyed on `audioUrl` above, which
+      // fires once React has mounted the <audio> element and applied its src.
+
+      // Log to history log
+      if (setHistoryData) {
+        // fileNameFromUrl strips the credential-bearing query string: in S3
+        // mode data.audio_url is a PRESIGNED URL whose query carries the AWS
+        // access key (X-Amz-Credential) + signature. Persisting it into
+        // localStorage (conversa_history) or rendering it would leak creds.
+        const entry = {
+          id: Date.now(),
+          name: fileNameFromUrl(data.audio_url, `tts.${audioFormat}`),
+          type: 'Text to Speech',
+          submitted: new Date().toLocaleString(),
+          time: data.processing_time ? `${data.processing_time.toFixed(2)}s` : '-',
+          status: 'Completed',
+        };
+        setHistoryData(prev => [entry, ...prev]);
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      const msg = err.message || 'TTS synthesis failed.';
+      setTtsError(msg);
+      showToast(msg, 'error');
+    } finally {
+      if (isCurrent()) setIsSynthesizing(false);
+    }
+  };
+
+  const handleDownloadAudio = () => {
+    const url = downloadUrl || audioUrl;
+    if (!url) return;
+    // The download URL is presigned with Content-Disposition: attachment, so a
+    // plain click saves the file (with a proper name) without opening a new tab.
+    const a = document.createElement('a');
+    a.href = url;
+    a.click();
+    showToast('Audio download started!', 'success');
+  };
+
+  const handleClearTTS = () => {
+    ttsGenRef.current += 1; // cancel any in-flight synthesis polling
+    setText('');
+    setIsSynthesizing(false);
+    setAudioBlob(null);
+    setAudioUrl(null);
+    setDownloadUrl(null);
+    setIsPlaying(false);
+    setTtsError('');
+    if (audioRef.current) audioRef.current.pause();
+  };
+
+  // ── STT: Microphone Recording ────────────────────────────────────────────
+  const startRecording = async () => {
+    sttGenRef.current += 1; // a new clip supersedes any in-flight transcription
+    setSttError('');
+    setTranscriptResult(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = 'Microphone recording is not supported in this browser. A secure HTTPS connection is required in production.';
+      setSttError(msg);
+      showToast(msg, 'error');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(
+        {
+          audio: {
+            autoGainControl: false,  // Prevents amplifying silence into loud static
+            noiseSuppression: true,  // Actively filters out background noise/hums
+            echoCancellation: true
+        }
+      });
+      audioChunksRef.current = [];
+      discardRecordingRef.current = false;
+      const mr = new MediaRecorder(stream);
+      mediaRecorderRef.current = mr;
+
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mr.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (micLevelMeterRef.current) {
+          micLevelMeterRef.current.stop();
+          micLevelMeterRef.current = null;
+        }
+        setMicLevel(0);
+        // Discarding directly stops the tracks, which also triggers this same onstop
+        // handler — skip building/showing a review clip when that happened.
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          return;
+        }
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        blob.name = `recording_${Date.now()}.webm`;
+        setReviewBlob(blob);
+        setSttState('reviewing');
+      };
+
+      mr.start();
+      setSttState('recording');
+      showToast('🎙️ Live recording active...', 'info');
+
+      // Auto-stop once the mic has heard nothing but silence for a while —
+      // otherwise it stays hot indefinitely if no one is speaking. Acts on
+      // this closure's own `mr` directly (not through stopRecording(), which
+      // reads `sttState` as of THIS render — still 'idle' here since the
+      // setter above hasn't applied yet — so it would silently no-op).
+      micLevelMeterRef.current = attachAudioLevelMeter(stream, {
+        onLevel: setMicLevel,
+        silenceTimeoutMs: 3500,
+        onSilence: () => {
+          if (mr.state !== 'inactive') mr.stop();
+        },
+      });
+    } catch (err) {
+      console.error('Microphone error:', err);
+      let msg = 'Microphone access denied or unavailable.';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        msg = 'Microphone access was blocked. Please allow microphone permissions in your browser/site settings.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        msg = 'No microphone found. Please connect a microphone and try again.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        msg = 'Microphone is busy. Close other apps/tabs using the mic and try again.';
+      }
+      setSttError(msg);
+      showToast(msg, 'error');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && sttState === 'recording') {
+      mediaRecorderRef.current.stop();
+      showToast('Recording stopped.', 'success');
+    }
+  };
+
+  const cancelRecording = () => {
+    sttGenRef.current += 1;
+    if (mediaRecorderRef.current) {
+      discardRecordingRef.current = true;
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop());
+    }
+    setReviewBlob(null);
+    setSttState('idle');
+    showToast('Recording cancelled.', 'info');
+  };
+
+  // ── STT: Review panel actions (shared by record + upload) ──────────────────
+  const closeReviewPanel = () => {
+    sttGenRef.current += 1; // stop any in-flight polling for the discarded clip
+    setReviewBlob(null);
+    setTranscriptResult(null);
+    setSttError('');
+    setSttState('idle');
+  };
+
+  const reviewPanelReRecord = () => {
+    setReviewBlob(null);
+    setTranscriptResult(null);
+    setSttError('');
+    setSttMode('record');
+    startRecording();
+  };
+
+  const reviewPanelReUpload = () => {
+    setReviewBlob(null);
+    setTranscriptResult(null);
+    setSttError('');
+    setSttMode('upload');
+    fileInputRef.current?.click();
+  };
+
+  const submitReviewedAudio = async () => {
+    if (!reviewBlob) return;
+    await transcribeFile(reviewBlob, sttMode === 'record');
+  };
+
+  // ── STT: Drag & Drop Upload ────────────────────────────────────────────────
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files?.[0]) {
+      processSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files?.[0]) {
+      processSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const processSelectedFile = (file) => {
+    const validExts = ['.mp3', '.wav', '.m4a', '.ogg', '.flac', '.webm'];
+    const isValid = file.type.startsWith('audio/') || validExts.some(ext => file.name.toLowerCase().endsWith(ext));
+    if (!isValid) {
+      showToast('Unsupported format. Please select an audio file (e.g. .mp3, .wav, .m4a, .ogg).', 'error');
+      return;
+    }
+    sttGenRef.current += 1; // a new clip supersedes any in-flight transcription
+    setReviewBlob(file);
+    setTranscriptResult(null);
+    setSttError('');
+    setSttState('reviewing');
+    showToast(`Loaded: ${file.name}`, 'info');
+  };
+
+  // ── STT: Core API Transcription Call ──────────────────────────────────────
+  const transcribeFile = async (file, fromMic = false) => {
+    // Take the next generation: if the user closes the panel, re-records, or
+    // submits another clip while this one is still transcribing, the counter
+    // moves on and this call must never touch state again — otherwise a slow
+    // job from a PREVIOUS recording pops in as the current recording's result.
+    const gen = ++sttGenRef.current;
+    const isCurrent = () => gen === sttGenRef.current;
+
+    setSttState('transcribing');
+    setSttError('');
+    setTranscriptResult(null);
+
+    try {
+      let result;
+      if (user?.api_key) {
+        result = await speechToText(user.api_key, file, sttLanguage || null);
+      } else {
+        result = await demoSTT(file, sttLanguage || null);
+      }
+
+      if (result?.status === 'queued' && result?.job_id) {
+        showToast('STT job queued, transcribing...', 'info');
+        let job = result;
+        // Cap polling so a stuck job can't spin this UI forever.
+        const deadline = Date.now() + 180000;
+        // Adaptive polling: short jobs finish in a few seconds, so poll fast
+        // at first and back off — a fixed 1.5s interval added up to 1.5s of
+        // dead wait AFTER the job had already completed.
+        let pollDelay = 500;
+        while (job.status === 'queued' || job.status === 'processing') {
+          if (!isCurrent()) return; // superseded — stop polling, discard result
+          if (Date.now() > deadline) {
+            throw new Error('STT job timed out after 3 minutes. Please try again.');
+          }
+          await new Promise(resolve => setTimeout(resolve, pollDelay));
+          pollDelay = Math.min(pollDelay * 1.5, 1500);
+          if (!isCurrent()) return;
+          job = await getJobStatus(user.api_key, result.job_id, 'stt');
+          if (job.status === 'failed') {
+            throw new Error(job.error || 'Async STT transcription failed on worker.');
+          }
+        }
+        result = job;
+      }
+
+      if (!isCurrent()) return;
+
+      const transcript = result?.detail ?? result?.transcript ?? result?.text ?? JSON.stringify(result);
+      const processingTime = result?.processing_time ? `${result.processing_time.toFixed(2)}s` : '-';
+      const filename = file.name || `recording.wav`;
+
+      setTranscriptResult({
+        filename,
+        duration: processingTime,
+        language: result?.language || sttLanguage || 'en',
+        confidence: null,
+        text: transcript,
+        segments: result?.segments || null,
+        request_id: result?.request_id,
+        raw: result,
+      });
+
+      // Default back to text tab on new transcription
+      setResultTab('text');
+      setSttState('completed');
+      showToast('✅ Transcription completed!', 'success');
+
+      if (setHistoryData) {
+        const entry = {
+          id: Date.now(),
+          name: filename,
+          type: 'Speech to Text',
+          submitted: new Date().toLocaleString(),
+          time: processingTime,
+          status: 'Completed',
+        };
+        setHistoryData(prev => [entry, ...prev]);
+      }
+    } catch (err) {
+      if (!isCurrent()) return;
+      const msg = err.message || 'Transcription failed.';
+      setSttError(msg);
+      setSttState(reviewBlob ? 'reviewing' : 'idle');
+      showToast(msg, 'error');
+    }
+  };
+
+  const copyTranscriptToClipboard = () => {
+    if (!transcriptResult) return;
+    navigator.clipboard.writeText(transcriptResult.text);
+    showToast('Transcript copied to clipboard!', 'success');
+  };
+
+  const handleDownloadTranscriptJSON = () => {
+    if (!transcriptResult) return;
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(transcriptResult, null, 2));
+    const a = document.createElement('a');
+    a.setAttribute('href', dataStr);
+    a.setAttribute('download', `${transcriptResult.filename.split('.')[0]}_transcript.json`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('Transcript downloaded as JSON.', 'success');
+  };
+
+  const formatSegmentTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 10);
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${ms}`;
+  };
+
+  // Group voices by gender, dynamically filtered by language category
+  const isIndicLanguage = (langCode) => {
+    const indicGroup = TTS_LANGUAGES.find(g => g.category === 'Indic Languages');
+    return indicGroup?.langs.some(l => l.code === langCode) || false;
+  };
+
+  const isIndic = isIndicLanguage(ttsLanguage);
+  const filteredVoices = voices.filter(v => {
+    const isGlobalVoice = v.model === 'qwen_custom_voice';
+    return isIndic ? !isGlobalVoice : isGlobalVoice;
+  });
+
+  const femaleVoices = filteredVoices.filter(v => v.gender?.toLowerCase() === 'female');
+  const maleVoices = filteredVoices.filter(v => v.gender?.toLowerCase() === 'male');
+
+  // Character Limit Calculations
+  const charPercentage = Math.min((text.length / CHAR_LIMIT) * 100, 100);
+  let progressBarColor = 'var(--success)';
+  if (text.length >= CHAR_LIMIT) {
+    progressBarColor = 'var(--error)';
+  } else if (text.length > CHAR_LIMIT * 0.85) {
+    progressBarColor = 'var(--warning)';
+  }
+
+  // Voice card renderer
+  const renderVoiceCard = (v) => {
+    const isActive = selectedVoice === v.id;
+    return (
+      <button
+        key={v.id}
+        onClick={() => setSelectedVoice(v.id)}
+        className={`conversa-voice-card ${isActive ? 'active' : ''}`}
+        type="button"
+      >
+        <div className="conversa-voice-card-header">
+          <span className="conversa-voice-name">{v.name}</span>
+          <span className="badge" style={{
+            background: v.gender === 'female' ? 'rgba(6, 182, 212, 0.1)' : 'rgba(124, 58, 237, 0.1)',
+            color: v.gender === 'female' ? 'var(--secondary)' : 'var(--primary-light)',
+            border: v.gender === 'female' ? '1px solid rgba(6, 182, 212, 0.2)' : '1px solid rgba(124, 58, 237, 0.2)'
+          }}>
+            {v.gender?.toUpperCase()}
+          </span>
+        </div>
+        <span className="conversa-voice-style">{v.style || 'Standard Neural Voice'}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="page-container animate-fade-in voice-tools-page">
+      {/* OrbitField background animation removed */}
+
+      {/* ═══════════════════ TABS ═══════════════════ */}
+      {(subView === 'studio' || subView === 'history') && (
+        <div className="tab-list">
+          <button onClick={() => setSubView('studio')} className={`tab-btn ${subView === 'studio' ? 'active' : ''}`}>
+            Studio
+          </button>
+          <button onClick={() => setSubView('history')} className={`tab-btn ${subView === 'history' ? 'active' : ''}`}>
+            History
+          </button>
+        </div>
+      )}
+
+      {/* ═══════════════════ HISTORY VIEW ═══════════════════ */}
+      {subView === 'history' ? (
+        <div style={styles.container}>
+          <div style={styles.filtersBarVT}>
+            <input
+              type="text"
+              placeholder="Search by filename..."
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              style={styles.historySearchInput}
+              className="history-search-input"
+            />
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="custom-table">
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Type</th>
+                  <th>Submitted</th>
+                  <th>Audio Duration</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyData
+                  .filter(item => item.name.toLowerCase().includes(historySearch.toLowerCase()))
+                  .map((item) => (
+                    <tr key={item.id}>
+                      <td style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {item.type === 'Text to Speech' ? (
+                          <Volume2 size={16} color="var(--primary-light)" style={{ flexShrink: 0 }} />
+                        ) : (
+                          <Mic size={16} color="var(--secondary)" style={{ flexShrink: 0 }} />
+                        )}
+                        <span style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{item.name}</span>
+                      </td>
+                      <td>{item.type}</td>
+                      <td>{item.submitted}</td>
+                      <td>{item.time}</td>
+                      <td>
+                        <span className={`badge ${
+                          item.status === 'Completed' ? 'badge-success' :
+                          item.status === 'Pending' ? 'badge-pending' : 'badge-danger'
+                        }`}>
+                          {item.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+
+                {historyData.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={styles.historyNoData}>
+                      No voice history yet — synthesize or transcribe something to see it here.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      /* ═══════════════════ UNIFIED VOICE STUDIO ═══════════════════ */
+      ) : (
+        <div style={styles.container}>
+          <div className="voice-studio-grid">
+            {/* Speech to Text panel */}
+            <div style={styles.studioColumn}>
+              <div style={styles.studioPanelHeader}>
+                <Mic size={18} color="var(--primary)" />
+                <h3 style={styles.studioPanelTitle}>Speech to Text</h3>
+              </div>
+              <div style={styles.sttLayout}>
+                {/* Mode Tab Switcher */}
+                <div style={styles.sttTabBar}>
+                  <button
+                    onClick={() => setSttMode('record')}
+                    style={{ ...styles.sttTab, ...(sttMode === 'record' ? styles.sttTabActive : {}) }}
+                    type="button"
+                  >
+                    <Mic size={15} /> Live Record
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSttMode('upload');
+                      fileInputRef.current?.click();
+                    }}
+                    style={{ ...styles.sttTab, ...(sttMode === 'upload' ? styles.sttTabActive : {}) }}
+                    type="button"
+                  >
+                    <Upload size={15} /> Choose Audio File
+                  </button>
+                </div>
+
+                {/* Target Language Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '600', whiteSpace: 'nowrap' }}>
+                    Acoustic Language:
+                  </label>
+                  <select
+                    value={sttLanguage}
+                    onChange={(e) => setSttLanguage(e.target.value)}
+                    className="form-input"
+                    style={{ maxWidth: '240px', flex: '1 1 160px', cursor: 'pointer', fontSize: '0.88rem' }}
+                  >
+                    {STT_LANGUAGES.map(l => (
+                      <option key={l.code} value={l.code}>{l.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* STT Operational Panel */}
+                <div className="glass-card" style={styles.sttCard}>
+
+                  {/* Hidden file input — always mounted so the review panel's "switch to upload" shortcut works regardless of current mode */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                    accept="audio/*"
+                  />
+
+                  {reviewBlob ? (
+                    /* 🔎 SHARED REVIEW/TRIM PANEL (record + upload both land here). Stays mounted
+                       through transcribing/completed so the same clip can be re-run to check for
+                       model hallucination — it only disappears when the panel's Close (X) is pressed. */
+                    <div>
+                      <h3 style={{ ...styles.cardSubHeader, marginBottom: '16px' }}>Review Audio</h3>
+                      <AudioReviewPanel
+                        blob={reviewBlob}
+                        fileName={reviewBlob?.name || 'recording.wav'}
+                        onBlobChange={setReviewBlob}
+                        onClose={closeReviewPanel}
+                        onReRecord={reviewPanelReRecord}
+                        onReUpload={reviewPanelReUpload}
+                        showToast={showToast}
+                      />
+                      {sttState === 'transcribing' ? (
+                        <div style={{ ...styles.transcribingWrapper, marginTop: '16px' }}>
+                          <Loader2 size={24} className="animate-spin" color="var(--primary)" />
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: '500' }}>
+                            {sttMode === 'record' ? 'Processing acoustic features...' : 'Uploading and parsing file chunks...'}
+                          </span>
+                        </div>
+                      ) : (
+                        <button onClick={submitReviewedAudio} className="btn btn-primary" style={{ width: '100%', marginTop: '16px', padding: '12px' }} type="button">
+                          <Sparkles size={16} /> {sttState === 'completed' ? 'Run Again' : 'Run Transcription Models'}
+                        </button>
+                      )}
+                    </div>
+
+                  ) : sttMode === 'record' ? (
+                    /* 🎙️ LIVE RECORDING LAYOUT */
+                    <div className="mic-record-wrapper">
+                      <h3 style={{ ...styles.cardSubHeader, marginBottom: '8px' }}>Microphone Streaming</h3>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '24px', textAlign: 'center' }}>
+                        Speak clearly. Audio streams inside your sandbox, and resolves to text via neural Whisper.
+                      </p>
+
+                      <div className="mic-halo-container">
+                        {sttState === 'recording' && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            pointerEvents: 'none',
+                            zIndex: 0,
+                          }}>
+                            <SiriOrb size={160} level={micLevel} active={true} />
+                          </div>
+                        )}
+                        <button
+                          onClick={sttState === 'recording' ? stopRecording : startRecording}
+                          className={`conversa-mic-btn ${sttState === 'recording' ? 'recording' : ''}`}
+                          type="button"
+                          title={sttState === 'recording' ? "Stop recording" : "Start recording"}
+                          style={{ position: 'relative', zIndex: 1 }}
+                        >
+                          {sttState === 'recording' ? <Square size={24} color="#ffffff" fill="#ffffff" /> : <Mic size={28} color="#ffffff" />}
+                        </button>
+                      </div>
+
+                      {sttState === 'recording' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                          <div className="badge badge-danger" style={{ animation: 'pulse 1s infinite alternate', marginBottom: '10px' }}>
+                            🔴 RECORDING ACTIVE
+                          </div>
+
+                          {/* Timer */}
+                          <div style={styles.recordingTimer}>
+                            {String(Math.floor(recordingTime / 60)).padStart(2, '0')}:{String(recordingTime % 60).padStart(2, '0')}
+                          </div>
+
+                          {/* Visualizer soundwave */}
+                          <div className="conversa-waveform active">
+                            {[...Array(12)].map((_, i) => (
+                              <div
+                                key={i}
+                                className="conversa-wave-bar"
+                                style={{ animationDelay: `${i * 0.08}s` }}
+                              />
+                            ))}
+                          </div>
+
+                          <div style={styles.btnGroup}>
+                            <button onClick={cancelRecording} className="btn btn-outline" style={{ padding: '8px 18px', fontSize: '0.85rem' }} type="button">
+                              Discard
+                            </button>
+                            <button onClick={stopRecording} className="btn btn-primary" style={{ padding: '8px 18px', background: '#ef4444', borderColor: '#ef4444', fontSize: '0.85rem' }} type="button">
+                              Finish & Process
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {sttState === 'idle' && (
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '10px' }}>
+                          Click the microphone to request stream access
+                        </p>
+                      )}
+                    </div>
+
+                  /* 📁 FILE UPLOAD LAYOUT */
+                  ) : (
+                    <div>
+                      <h3 style={{ ...styles.cardSubHeader, marginBottom: '16px' }}>Local File Input</h3>
+
+                      <div
+                        className={`conversa-dropzone ${dragActive ? 'drag-active' : ''}`}
+                        onDragEnter={handleDragEnter}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <div className="conversa-dropzone-icon">
+                          <Upload size={24} color="var(--primary-light)" />
+                        </div>
+                        <p className="conversa-dropzone-text">
+                          Drag and drop audio file here
+                        </p>
+                        <p className="conversa-dropzone-subtext">
+                          or click to browse local files (WAV, MP3, M4A, OGG up to 25MB)
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Error Banner */}
+                {sttError && (
+                  <div style={styles.errorBanner} className="animate-fade-in">
+                    <AlertCircle size={16} color="#ef4444" />
+                    <span>{sttError}</span>
+                  </div>
+                )}
+
+                {/* Results card */}
+                {transcriptResult && (
+                  <div className="glass-card animate-fade-in" style={styles.sttCard}>
+                    <div style={styles.resultsHeader}>
+                      <h3 style={styles.cardSubHeader}>Transcription Complete</h3>
+                      <div style={styles.resultsActions}>
+                        <button onClick={copyTranscriptToClipboard} className="voice-action-icon-btn" style={styles.actionIconBtn} title="Copy Full Text" type="button">
+                          <Copy size={16} />
+                        </button>
+                        <button onClick={handleDownloadTranscriptJSON} className="voice-action-icon-btn" style={styles.actionIconBtn} title="Download JSON Response" type="button">
+                          <File size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Meta details badges */}
+                    <div style={styles.resultsMeta}>
+                      <div style={styles.metaBadge}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Source:</span>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: '600', fontSize: '0.8rem' }}>{transcriptResult.filename}</span>
+                      </div>
+                      {transcriptResult.duration && (
+                        <div style={styles.metaBadge}>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Processing Time:</span>
+                          <span style={{ color: 'var(--text-primary)', fontWeight: '600', fontSize: '0.8rem' }}>{transcriptResult.duration}</span>
+                        </div>
+                      )}
+                      <div style={styles.metaBadge}>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Language:</span>
+                        <span style={{ color: 'var(--primary-light)', fontWeight: '600', fontSize: '0.8rem' }}>
+                          {transcriptResult.language?.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Sub-view tab switcher for Result Card (if segments exist) */}
+                    {transcriptResult.segments && transcriptResult.segments.length > 0 && (
+                      <div style={{ ...styles.sttTabBar, marginBottom: '20px', maxWidth: '300px' }}>
+                        <button
+                          onClick={() => setResultTab('text')}
+                          style={{ ...styles.sttTab, padding: '6px 12px', fontSize: '0.82rem', ...(resultTab === 'text' ? styles.sttTabActive : {}) }}
+                          type="button"
+                        >
+                          Full Paragraph
+                        </button>
+                        <button
+                          onClick={() => setResultTab('timeline')}
+                          style={{ ...styles.sttTab, padding: '6px 12px', fontSize: '0.82rem', ...(resultTab === 'timeline' ? styles.sttTabActive : {}) }}
+                          type="button"
+                        >
+                          Segments Timeline
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Content Box */}
+                    {resultTab === 'text' ? (
+                      <div style={styles.transcriptBox}>
+                        <h4 style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '12px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                          Text Transcript
+                        </h4>
+                        <p style={{ fontSize: '0.92rem', color: 'var(--text-primary)', lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>
+                          {transcriptResult.text}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="conversa-timeline">
+                        {transcriptResult.segments.map((seg, idx) => (
+                          <div key={idx} className="conversa-timeline-item">
+                            <div className="conversa-timeline-dot"></div>
+                            <div className="conversa-timeline-time">
+                              {formatSegmentTime(seg.start)} &rarr; {formatSegmentTime(seg.end)}
+                            </div>
+                            <div className="conversa-timeline-text">{seg.text ?? seg.word ?? ''}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Text to Speech panel */}
+            <div style={styles.studioColumn}>
+              <div style={styles.studioPanelHeader}>
+                <Volume2 size={18} color="var(--secondary)" />
+                <h3 style={styles.studioPanelTitle}>Text to Speech</h3>
+              </div>
+
+          <div className="glass-card" style={styles.ttsCard}>
+            {/* Target Language dropdown */}
+            <div className="form-group">
+              <label className="form-label">Target Synthesis Language</label>
+              <select
+                value={ttsLanguage}
+                onChange={(e) => setTtsLanguage(e.target.value)}
+                className="form-input"
+                style={{ cursor: 'pointer' }}
+              >
+                {TTS_LANGUAGES.map((group) => (
+                  <optgroup key={group.category} label={group.category} style={{ background: 'var(--bg-main)', color: 'var(--text-primary)' }}>
+                    {group.langs.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            {/* Premium Voice Selector */}
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label className="form-label">Available Speaker Voices</label>
+              
+              {femaleVoices.length > 0 && (
+                <div style={{ marginBottom: '12px' }}>
+                  <h5 style={{ fontSize: '0.75rem', color: 'var(--secondary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Female Voices</h5>
+                  <div className="conversa-voice-grid">
+                    {femaleVoices.map((v) => renderVoiceCard(v))}
+                  </div>
+                </div>
+              )}
+
+              {maleVoices.length > 0 && (
+                <div style={{ marginBottom: '6px' }}>
+                  <h5 style={{ fontSize: '0.75rem', color: 'var(--primary-light)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Male Voices</h5>
+                  <div className="conversa-voice-grid">
+                    {maleVoices.map((v) => renderVoiceCard(v))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Output Format */}
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label className="form-label">Output Audio Format</label>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {['wav', 'mp3'].map((format) => (
+                  <button
+                    key={format}
+                    onClick={() => setAudioFormat(format)}
+                    className="btn"
+                    style={{
+                      flex: 1,
+                      border: audioFormat === format ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                      background: audioFormat === format ? 'rgba(124, 58, 237, 0.08)' : 'transparent',
+                      color: audioFormat === format ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      padding: '10px',
+                    }}
+                    type="button"
+                  >
+                    {format.toUpperCase()} Audio
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Synthesis Text Input */}
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label className="form-label">Plain Text Input</label>
+              <textarea
+                rows={6}
+                value={text}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setText(val.length > CHAR_LIMIT ? val.slice(0, CHAR_LIMIT) : val);
+                }}
+                placeholder="Type or paste the sentences you want to convert to high-fidelity speech..."
+                className="form-input"
+                style={{ resize: 'vertical', background: 'var(--bg-main)' }}
+                maxLength={CHAR_LIMIT}
+              />
+              
+              {/* Character Limit Indicator */}
+              <div className="char-limit-container">
+                <div className="char-limit-bar-bg">
+                  <div 
+                    className="char-limit-bar-fill" 
+                    style={{ 
+                      width: `${charPercentage}%`, 
+                      backgroundColor: progressBarColor 
+                    }} 
+                  />
+                </div>
+                <div className="char-limit-info">
+                  <span>{text.length} / {CHAR_LIMIT} characters</span>
+                  {text.length > CHAR_LIMIT && (
+                    <span style={{ color: 'var(--error)', fontWeight: '600' }}>Exceeds maximum character limit!</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={styles.textareaFooter}>
+                <div></div>
+                <button onClick={handleClearTTS} style={styles.clearBtn} className="voice-clear-btn" type="button">
+                  <Trash2 size={14} /> Reset Form
+                </button>
+              </div>
+            </div>
+
+            {/* Error Banner */}
+            {ttsError && (
+              <div style={styles.errorBanner} className="animate-fade-in">
+                <AlertCircle size={16} color="#ef4444" />
+                <span>{ttsError}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={styles.actionRow}>
+              <button
+                onClick={handleConvertToSpeech}
+                disabled={isSynthesizing || !text.trim() || text.length > CHAR_LIMIT}
+                className="btn btn-primary"
+                style={styles.convertBtn}
+                type="button"
+              >
+                {isSynthesizing ? <Loader2 size={16} className="animate-spin" /> : <Volume2 size={16} />}
+                {isSynthesizing ? 'Synthesizing...' : 'Synthesize Audio'}
+              </button>
+
+              {audioUrl && (
+                <button onClick={handleDownloadAudio} className="btn btn-outline" style={{ padding: '12px 20px' }} type="button">
+                  <Download size={16} /> Save Audio File
+                </button>
+              )}
+
+              {/* Loader soundwave animation */}
+              {isSynthesizing && (
+                <div style={styles.soundwave}>
+                  {[0, 0.15, 0.3, 0.45, 0.6].map((delay, i) => (
+                    <div key={i} style={{ ...styles.waveBar, animationDelay: `${delay}s` }}></div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Premium Audio Player */}
+            {audioUrl && (
+              <div style={styles.audioPlayerBox} className="animate-fade-in">
+                <div style={styles.audioPlayerHeader}>
+                  <Volume2 size={16} color="var(--primary)" />
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                    Synthesized: {selectedVoice.toUpperCase()} · Language: {ttsLanguage.toUpperCase()} · Format: {audioFormat.toUpperCase()}
+                  </span>
+                </div>
+                <audio
+                  ref={audioRef}
+                  src={audioUrl}
+                  controls
+                  style={{ width: '100%', marginTop: '12px', borderRadius: '8px' }}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={() => setIsPlaying(false)}
+                />
+              </div>
+            )}
+          </div>
+            </div>
+          </div>
+
+          {/* Active API Details */}
+          <div style={styles.apiKeyBanner}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <CheckCircle2 size={16} color="var(--success)" />
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Conversa Gateway Endpoint Active:&nbsp;
+                <code style={{ color: 'var(--primary-light)', fontSize: '0.82rem' }}>
+                  {user?.api_key ? `${user.api_key.slice(0, 12)}...` : 'Demo Gateway'}
+                </code>
+              </span>
+            </div>
+          </div>
+
+          {/* Core Feature Showcases */}
+          <div style={styles.whySection}>
+            <h3 style={styles.secTitle}>Key Operational Strengths</h3>
+            <div style={styles.whyGrid}>
+              <div>
+                <h4 style={styles.whyItemTitle}>Neural Clarity</h4>
+                <p style={styles.whyItemText}>Engineered using custom speaker embeddings to maintain expressive pacing and consistent tone.</p>
+              </div>
+              <div>
+                <h4 style={styles.whyItemTitle}>Dynamic Multilingual Support</h4>
+                <p style={styles.whyItemText}>Handles both Indian regional dialects (Parler pipeline) and global languages (Qwen3-TTS pipeline).</p>
+              </div>
+              <div>
+                <h4 style={styles.whyItemTitle}>Automatic Segment Parsing</h4>
+                <p style={styles.whyItemText}>Extracts and displays timestamps down to milliseconds, perfect for captioning and audio timelines.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const styles = {
+  container: { width: '100%' },
+  filtersBarVT: { display: 'flex', marginBottom: '20px' },
+  historySearchInput: {
+    width: '100%',
+    maxWidth: '360px',
+    padding: '10px 16px',
+    background: 'var(--bg-subtle)',
+    border: '1px solid var(--border-color)',
+    borderRadius: '8px',
+    color: 'var(--text-primary)',
+    fontSize: '0.9rem',
+    outline: 'none',
+  },
+  historyNoData: {
+    padding: '32px',
+    textAlign: 'center',
+    color: 'var(--text-muted)',
+    fontSize: '0.9rem',
+  },
+  studioColumn: {
+    display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0,
+  },
+  studioPanelHeader: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+  },
+  studioPanelTitle: {
+    fontSize: '1.15rem', color: 'var(--text-primary)', margin: 0,
+  },
+
+  apiKeyBanner: {
+    marginTop: '24px', maxWidth: '700px', margin: '24px auto 0',
+    background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.15)',
+    borderRadius: '10px', padding: '12px 20px',
+  },
+  whySection: { marginTop: '80px', borderTop: '1px solid var(--border-color)', paddingTop: '64px' },
+  secTitle: { fontSize: '1.5rem', color: 'var(--text-primary)', marginBottom: '32px', textAlign: 'center' },
+  whyGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px,1fr))', gap: '32px', textAlign: 'left' },
+  whyItemTitle: { fontSize: '1.05rem', color: 'var(--text-primary)', marginBottom: '8px' },
+  whyItemText: { fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: '1.5' },
+  ttsCard: { padding: '22px' },
+  cardSubHeader: { fontSize: '1.1rem', color: 'var(--text-primary)', fontWeight: '600', marginBottom: '16px' },
+  textareaFooter: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', fontSize: '0.8rem', color: 'var(--text-muted)' },
+  clearBtn: { background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: 'var(--transition)' },
+  actionRow: { marginTop: '24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' },
+  convertBtn: { padding: '12px 24px', display: 'flex', alignItems: 'center', gap: '8px' },
+  soundwave: { display: 'flex', alignItems: 'center', gap: '4px', height: '32px' },
+  waveBar: { width: '4px', height: '10px', background: 'var(--primary-light)', borderRadius: '2px', animation: 'wave 1s infinite alternate ease-in-out' },
+  audioPlayerBox: {
+    marginTop: '24px', background: 'rgba(124, 58, 237,0.03)', border: '1px solid var(--border-color)',
+    borderRadius: '12px', padding: '16px',
+  },
+  audioPlayerHeader: { display: 'flex', alignItems: 'center', gap: '10px' },
+  errorBanner: {
+    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+    borderRadius: '8px', padding: '12px 16px', display: 'flex', alignItems: 'center',
+    gap: '10px', fontSize: '0.85rem', color: 'var(--error)', margin: '16px 0',
+  },
+  sttLayout: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  sttTabBar: {
+    display: 'flex', gap: '4px', background: 'rgba(15,23,42,0.02)',
+    border: '1px solid var(--border-color)', borderRadius: '12px', padding: '4px',
+  },
+  sttTab: {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    padding: '10px 16px', borderRadius: '8px', border: 'none', background: 'transparent',
+    color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: '600', cursor: 'pointer',
+    transition: 'var(--transition)',
+  },
+  sttTabActive: {
+    background: 'rgba(124, 58, 237, 0.15)', color: 'var(--text-primary)',
+    boxShadow: '0 0 0 1px rgba(124, 58, 237, 0.3)',
+  },
+  sttCard: { padding: '22px' },
+  recordingTimer: { fontSize: '2.2rem', fontWeight: '700', color: 'var(--text-primary)', fontFamily: 'monospace', marginBottom: '8px' },
+  btnGroup: { display: 'flex', gap: '10px', marginTop: '16px' },
+  transcribingWrapper: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px',
+    padding: '20px', background: 'rgba(124, 58, 237,0.03)', borderRadius: '8px',
+    border: '1px solid var(--border-color)', width: '100%',
+  },
+  resultsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
+  resultsActions: { display: 'flex', gap: '8px' },
+  actionIconBtn: {
+    background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)',
+    padding: '8px', borderRadius: '6px', cursor: 'pointer', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', transition: 'var(--transition)',
+  },
+  resultsMeta: { display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' },
+  metaBadge: {
+    display: 'flex', alignItems: 'center', gap: '6px',
+    background: 'rgba(15,23,42,0.02)', padding: '6px 12px',
+    borderRadius: '20px', border: '1px solid var(--border-color)',
+  },
+  transcriptBox: {
+    background: 'var(--bg-subtle)', border: '1px solid var(--border-color)',
+    borderRadius: '8px', padding: '20px',
+  },
+};
